@@ -43,4 +43,3 @@ chmod u+x ${SCRIPT}
 # rm ${SCRIPT} # Uncomment to delete the scripts after they are commited.
 
 done
-from python to bash variable
