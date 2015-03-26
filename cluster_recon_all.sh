@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # Script to run Freesufer recon-all on several subjects on the cluster 
-# version: 0.1
+# version: 0.3
 # Author: mje, mads [] cnru.dk
 
 # Loop to create a script per subject and submit to cluster
-for sub in # TODO: set subject numbers
+for sub in 0002 # TODO: set subject numbers
 do 
 
 # Assign variables for script and output files
     SCRIPT=sub_recon_${sub}.sh
-    sub_id=sub_${sub} # TODO: Change to proper subject name for the freesurfer SUBJECTS_DIR
+    sub_id=MADS_test_sub_${sub} # TODO: Change to proper subject name for the freesurfer SUBJECTS_DIR
  
 # Generate a single script
 cat << EOF > ${SCRIPT}
@@ -24,22 +24,23 @@ PATH=$PATH:/usr/local/mni/bin:/usr/local/cfin/bin:.
 export FREESURFER_HOME=/usr/local/freesurfer
 source $FREESURFER_HOME/SetUpFreeSurfer.sh
 
-export SUBJECTS_DIR=/projects/SOMETHING # TODO: set the path 
-export SCRIPT_dir=/projects/MINDLAB-SOMETHING/scripts
+export SUBJECTS_DIR=/projects/MEG_EEG-Training/scratch/fs_subjects_dir
+export SCRIPT_dir=/projects/MEG_EEG-Training/scripts/mads_test_scripts
 
 # Change to current directory.
 cd `pwd` # TODO: change to scratch or log dir
 
 # Run the program with the parameters:
-recon-all -s -i -all # FIXME: find way to provide dicom for input and 
+recon-all -s ${sub_id} -i $(python /projects/MEG_EEG-Training/scripts/mads_test_scripts/dicom_from_db.py ${sub}) -all
 EOF
 
 # Make the new script executable
 chmod u+x ${SCRIPT}
 
 # Finally submit it to the cluster in the long.q queue
-qsub -j y -q long.q ${SCRIPT}
+# qsub -j y -q long.q ${SCRIPT}
 
 # rm ${SCRIPT} # Uncomment to delete the scripts after they are commited.
 
 done
+from python to bash variable
