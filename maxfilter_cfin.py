@@ -49,7 +49,8 @@ def fit_sphere_to_headshape(info, ylim=None, zlim=None, verbose=None):
 
     """
     # get head digization points, excluding some frontal points (nose etc.)
-    hsp = [p['r'] for p in info['dig'] if p['kind'] == FIFF.FIFFV_POINT_EXTRA
+    hsp = [p['r'] for p in info['dig'] if \
+            (p['kind'] == FIFF.FIFFV_POINT_EXTRA or p['kind'] == FIFF.FIFFV_POINT_EEG)
            and not (p['r'][2] < 0 and p['r'][1] > 0)]
 
     if not ylim is None:
