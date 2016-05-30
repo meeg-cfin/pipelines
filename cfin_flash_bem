@@ -1,0 +1,428 @@
+#!/bin/sh
+#
+#    This script creates the BEM meshes using flash images
+#
+#    Before running this script:
+#
+#    1. Run organize_mri_data to create a directory structure with appropriate links
+#    2. Create symbolic links to make flash05 and flash30 point to the appropriate series
+#       The echos should be numbered 001 ... 008 under each of these directories
+#    3. Set SUBJECTS_DIR and SUBJECT environment variables appropriately
+#    4. cd to the directory where flash05 and flash 
+#    5. Run this script without any arguments
+#
+#       
+#   Copyright 2006
+#
+#   Matti Hamalainen
+#   Athinoula A. Martinos Center for Biomedical Imaging
+#   Massachusetts General Hospital
+#   Charlestown, MA, USA
+#
+#   $Id: mne_flash_bem 3255 2010-11-15 18:34:59Z msh $
+#
+#   Revision 1.5  2008/10/23 21:41:45  msh
+#   Check for FREESURFER_HOME when appropriate
+#   mne_setup_source_space does not need the freesurfer license any more
+#
+#   Revision 1.4  2007/01/18 20:56:32  msh
+#   Exit if SUBJECTS_DIR or SUBJECT has not been set
+#
+#   Revision 1.3  2007/01/18 20:53:14  msh
+#   Allow echo numbering starting from 002
+#
+#   Revision 1.2  2006/05/16 11:48:09  msh
+#   Eliminated some possibilities for unreported failure.
+#
+#   Revision 1.1  2006/05/16 02:29:49  msh
+#   Added mne_flash_bem and mne_organize_dicom
+#
+#
+#
+usage()
+{
+	echo "usage: $0 [options] <FLASH5 dir> "
+	echo
+	echo "    -subjid <SUBJECT>  Subject ID"
+	echo "    --noconvert        Assume that the images have already been converted"
+	echo "    --help             List this info"
+	echo "    --usage            List this info"
+    echo ""
+    echo "    FLASH5 dir         path to folder with sorted MEF-sequence"
+    echo "    T1 target          name of whole head T1 in \$SUBJECTS_DIR/\$SUBJECT/mri"
+    echo "                       NB: if MP2RAGE, background must be removed!"
+	echo 
+}
+convert=true
+flash30=false
+unwarp=
+while [ $# -gt 0 ]
+do
+	case "$1" in  
+	    --noconvert)
+		convert=false
+		;;
+	    --noflash30)
+		flash30=false
+		;;
+	    --unwarp)
+		shift
+		if [ $# -eq 0 ]
+		then
+			echo "--unwarp: argument required."
+			exit 1
+		else
+			unwarp=$1
+		fi
+		;;
+	    -subjid)
+		shift
+		if [ $# -eq 0 ]
+		then
+            echo "-subjid: SUBJECT_NAME"
+			exit 1
+		else
+			SUBJECT=$1
+		fi
+		;;
+	    --usage)
+		usage
+		exit 1
+		;;
+	    --help)
+		usage
+		exit 1
+		;;
+        *)
+        FLASH5_DIR=$1
+        shift
+        ;;
+	esac
+	shift
+done
+
+if [ ! "$FREESURFER_HOME" ] ; then 
+    echo "The FreeSurfer environment needs to be set up for this script"
+    exit 1
+fi
+if [ ! "$SUBJECTS_DIR" ]
+then 
+    echo "SUBJECTS_DIR has not been set"
+    exit 1
+fi
+if [ ! "$SUBJECT" ]
+then
+    echo "SUBJECT has not been set"
+    exit 1
+fi
+#
+start_time=$(date)
+echo 
+echo "Processing the flash MRI data for subject $SUBJECT to produce"
+echo "BEM meshes under $SUBJECTS_DIR/$SUBJECT/bem/flash"
+echo 
+#
+#   Step 1 : Data conversion to mgz format
+#
+mkdir -p $SUBJECTS_DIR/$SUBJECT/mri/flash_5echo/parameter_maps
+step=0
+echos_done=0
+if [ "$convert" == true ] ; then
+    step=$(($step+1))    
+    echo 
+    echo   "Step $step : Converting images..."
+    echo
+    echos="001 002 003 004 005"
+    if [ "$flash30" == true ] ; then
+	flashes="05 30"
+    else
+	flashes="05"
+    fi
+    missing=false
+    for flash in $flashes
+    do
+	for echo in $echos
+	do
+	    dir=${FLASH5_DIR}/flash${flash}/$echo
+	    if [ ! -d $dir ]
+	    then 
+		missing=true
+	    fi
+	done
+    done
+    if [ "$missing" = true ]
+    then
+	echos="002 003 004 005 006"
+    fi
+    for flash in $flashes
+    do
+	for echo in $echos
+	do
+	    dir=${FLASH5_DIR}/flash${flash}/$echo
+	    if [ ! -d $dir ]
+	    then 
+		echo "Directory $dir is missing"
+		exit 1
+	    fi
+	done
+    done
+#
+    for flash in $flashes
+    do
+	for echo in $echos
+	do
+	    dir=${FLASH5_DIR}/flash${flash}/$echo
+	    if [ ! -d $dir ]
+	    then 
+		echo "Directory $dir is missing"
+		exit 1
+	    fi
+	    sample_file=$(ls -1 $dir | head -1)
+	    dest_file=$SUBJECTS_DIR/$SUBJECT/mri/flash_5echo/mef${flash}_${echo}.mgz
+#
+#   Do not redo
+#
+	    if [ -f $dest_file ]
+	    then
+		echo "$dest_file is already there"
+	    else 
+		mri_convert $dir/$sample_file $dest_file
+		let echos_done=$echos_done+1
+	    fi
+	done
+    done
+fi
+cd $SUBJECTS_DIR/$SUBJECT/mri/flash_5echo
+if [ $? -ne 0 ]
+then
+    echo "Could not change to directory $SUBJECTS_DIR/$SUBJECT/mri/flash_5echo"
+    exit 1
+fi
+#
+if [ "$unwarp" ] ; then
+    files=$(ls mef*.mgz)
+    for file in $files ; do
+	infile=$file
+	outfile=$(basename $file .mgz)u.mgz
+	grad_unwarp -i $infile -o $outfile -unwarp $unwarp
+	if [ $? -ne 0 ] ; then
+	    echo "Could not unwarp with option $unwarp"
+	    exit 1
+	fi
+    done
+fi
+#
+#  Step 2 : Create the parameter maps
+#
+#
+#  Clear everything if some of the data were reconverted
+#
+if [ $echos_done -gt 0 ]
+then
+    rm -rf parameter_maps/*
+    echo "Parameter maps directory cleared"
+fi
+mkdir -p parameter_maps
+if [ "$flash30" == true ] ; then
+    step=$(($step+1))
+    echo
+    echo "Step $step : Creating the parameter maps..."
+    echo
+    if [ "$unwarp" ] ; then
+	files=$(ls mef05*u.mgz mef30*u.mgz)
+    else
+	files=$(ls mef05*.mgz mef30*.mgz)
+    fi
+    if [ $(ls -1 parameter_maps | wc -l) -eq 0 ] ; then
+	mri_ms_fitparms $files parameter_maps
+    else
+	echo "Parameter maps were already computed"
+    fi
+#
+#  Step 3 : Synthesize the flash 5 images
+#
+    step=$(($step+1))
+    echo
+    echo  "Step $step : Synthesizing flash 5..."
+    echo
+    cd parameter_maps
+    if [ ! -f flash5.mgz ] ; then
+	mri_synthesize 20 5 5 T1.mgz PD.mgz flash5.mgz
+	rm -f flash5_reg.mgz
+    else
+	echo "Synthesized flash 5 volume is already there"
+    fi
+else
+    step=$(($step+1))
+    echo
+    echo  "Step $step : Averaging flash5 echoes..."
+    echo
+    cd parameter_maps
+    if [ "$unwarp" ] ; then
+	files=$(ls ../mef05*u.mgz)
+    else
+	files=$(ls ../mef05*.mgz)
+    fi
+    mri_average -noconform $files flash5.mgz
+    if [ $? -ne 0 ] ; then
+	echo "Could compute the average of $files"
+	exit 1
+    fi
+    rm -f flash5_reg.mgz
+fi
+#
+#   Step 4 : Register with MPRAGE
+#
+step=$(($step+1))
+echo
+echo  "Step $step : Registering flash 5 with MPRAGE..."
+echo
+if [ ! -f flash5_reg.mgz ]
+then
+    if [ -f "../../T1.mgz" ]
+    then
+	ref_volume="../../T1.mgz"
+    else
+	ref_volume="../../T1"
+    fi
+    fsl_rigid_register -r $ref_volume -i flash5.mgz -o flash5_reg.mgz
+else
+    echo "Registered flash 5 image is already there"
+fi
+#
+#   Step 4a : Convert flash5 into COR
+#
+step=$(($step+1))
+echo
+echo "Step ${step}a: Converting flash5 volume into COR format..."
+echo
+mkdir -p ../../flash5
+rm -f ../../flash5/*
+mri_convert flash5_reg.mgz ../../flash5
+if [ $? -ne 0 ]
+then
+    echo "flash5 volume conversion to COR failed"
+    exit 1
+fi
+#
+#  Step 4b and c : Convert the mgz volumes into COR
+#
+cd $SUBJECTS_DIR/$SUBJECT/mri
+convertT1=false
+if [ -d T1 ] 
+then
+    if [ $(ls -1 T1/COR* 2>/dev/null | wc -l) -eq 0 ]
+    then
+	convertT1=true
+    fi
+else
+    convertT1=true
+fi
+convertbrain=false
+if [ -d brain ] 
+then
+    if [ $(ls -1 brain/COR* 2>/dev/null | wc -l) -eq 0 ]
+    then
+	convertbrain=true
+    fi
+else
+    convertbrain=true
+fi
+if [ $convertT1 = true ]
+then
+    echo
+    echo "Step ${step}b : Converting T1 volume into COR format..."
+    echo
+    if [ ! -f T1.mgz ]
+    then
+	echo "Both T1 mgz and T1 COR volumes missing"
+	exit 1
+    fi
+    mkdir -p T1
+    mri_convert T1.mgz T1
+    if [ $? -ne 0 ]
+    then
+	echo "T1 volume conversion to COR failed"
+	exit 1
+    fi
+else
+    echo
+    echo "Step ${step}b : T1 volume is already in COR format"
+    echo
+fi
+if [ $convertbrain = true ]
+then
+    echo
+    echo "Step ${step}c : Converting brain volume into COR format..."
+    echo
+    if [ ! -f brain.mgz ]
+    then
+	echo "Both brain mgz and brain COR volumes missing"
+	exit 1
+    fi
+    mkdir -p brain
+    mri_convert brain.mgz brain
+    if [ $? -ne 0 ]
+    then
+	echo "brain volume conversion to COR failed"
+	exit 1
+    fi
+else
+    echo
+    echo "Step ${step}c : brain volume is already in COR format"
+    echo
+fi
+#
+#   Finally ready to go
+#
+step=$(($step+1))
+echo 
+echo "Step $step : Creating the BEM surfaces..."
+echo
+mri_make_bem_surfaces $SUBJECT
+step=$(($step+1))
+echo 
+echo "Step $step : Converting the tri files into surf files..."
+#
+cd $SUBJECTS_DIR/$SUBJECT/bem
+mkdir -p flash_5echo
+cd flash_5echo
+surfs="inner_skull outer_skull outer_skin"
+for surf in $surfs
+do
+     echo
+     echo "$surf ..."
+     echo
+     mv ../${surf}.tri ${surf}.tri
+     mne_convert_surface --tri ${surf}.tri --surfout ${surf}.surf --swap --mghmri $SUBJECTS_DIR/$SUBJECT/mri/flash_5echo/parameter_maps/flash5_reg.mgz
+done
+#
+#   Cleanup section
+#
+echo 
+echo "Final step : Cleaning up..."
+echo
+cd $SUBJECTS_DIR/$SUBJECT/bem
+rm inner_skull_tmp.tri
+cd $SUBJECTS_DIR/$SUBJECT/mri
+if [ $convertT1 = true ]
+then
+    rm -rf T1
+    echo "Deleted the T1 COR volume"
+fi
+if [ $convertbrain = true ]
+then
+    rm -rf brain
+    echo "Deleted the brain COR volume"
+fi
+rm -rf flash5
+echo "Deleted the flash5 COR volume"
+echo
+echo "Thank you for waiting."
+echo "The BEM triangulations for this subject are now available at $SUBJECTS_DIR/$SUBJECT/bem/flash"
+echo "We hope the BEM meshes created will facilitate your MEG and EEG data analyses."
+echo
+echo "Processing started at $start_time"
+echo "Processing finished at $(date)"
+echo
+exit 0
