@@ -49,7 +49,7 @@ ICAraw = 1
 #print argv
 file_name        = argv[1]
 rawRoot          = argv[2]
-saveRoot         = argv[3]
+resultsRoot      = argv[3]
 scriptsRoot       = argv[4]
 print file_name
 
